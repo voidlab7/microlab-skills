@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <clipPath id="win"><rect x="152" y="292" width="720" height="480" rx="48"/></clipPath>
+  </defs>
+
+  <!-- app-icon tile, no border ring -->
+  <rect width="1024" height="1024" rx="230" fill="#fafaf8"/>
+
+  <g transform="translate(512 512) scale(1.12) translate(-512 -512)">
+    <!-- landscape code window card -->
+    <rect x="152" y="292" width="720" height="480" rx="48" fill="#ffffff" stroke="#1d1c1a" stroke-width="24"/>
+
+    <!-- title bar -->
+    <g clip-path="url(#win)">
+      <rect x="152" y="292" width="720" height="104" fill="#1d1c1a"/>
+    </g>
+    <!-- macOS traffic dots -->
+    <circle cx="216" cy="344" r="17" fill="#e5412d"/>
+    <circle cx="266" cy="344" r="17" fill="#f5b83d"/>
+    <circle cx="316" cy="344" r="17" fill="#3fa650"/>
+    <!-- code glyph in title bar, echoes family `</>` treatment -->
+    <text x="790" y="378" font-family="JetBrains Mono, Menlo, monospace" font-size="76" font-weight="700" fill="#ffffff" text-anchor="middle">&lt;/&gt;</text>
+
+    <!-- code lines: keyword + indent waterfall -->
+    <g stroke-linecap="round">
+      <line x1="224" y1="470" x2="352" y2="470" stroke="#e5412d" stroke-width="18"/>
+      <line x1="368" y1="470" x2="560" y2="470" stroke="#1d1c1a" stroke-width="18"/>
+      <line x1="272" y1="526" x2="680" y2="526" stroke="#8a8a84" stroke-width="18"/>
+      <line x1="272" y1="582" x2="560" y2="582" stroke="#d9d9d4" stroke-width="18"/>
+      <line x1="224" y1="638" x2="300" y2="638" stroke="#1d1c1a" stroke-width="18"/>
+      <line x1="316" y1="638" x2="448" y2="638" stroke="#8a8a84" stroke-width="18"/>
+    </g>
+
+    <!-- red PNG badge, echoes family PDF badge -->
+    <rect x="608" y="606" width="216" height="104" rx="22" fill="#e5412d"/>
+    <text x="716" y="676" font-family="Archivo, Helvetica, sans-serif" font-size="58" font-weight="800" fill="#ffffff" text-anchor="middle" letter-spacing="3">PNG</text>
+  </g>
+</svg>

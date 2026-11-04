@@ -1,0 +1,23 @@
+NOTICE — 第三方组件声明
+========================
+
+本技能包包含以下第三方开源组件，在此致谢并声明其许可证：
+
+1. Highlight.js v11.11.1
+   - 路径：scripts/vendor/highlight.min.js
+   - 版权：(c) 2006-2024 Josh Goebel, Ivan Sagalaev 及贡献者
+   - 许可证：BSD-3-Clause
+   - 源码：https://github.com/highlightjs/highlight.js
+   - 修改说明：未修改，原样分发（common bundle）
+
+BSD 3-Clause License 原文节选：
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions are met:
+  1. Redistributions of source code must retain the above copyright notice.
+  2. Redistributions in binary form must reproduce the above copyright notice.
+  3. Neither the name of the copyright holder nor the names of its contributors
+     may be used to endorse or promote products derived from this software
+     without specific prior written permission.
+
+其余文件（SKILL.md、scripts/*.mjs）为本技能原创代码。
+本技能与 carbon.now.sh（carbon-app/carbon）无代码关系，仅对标其视觉风格。
