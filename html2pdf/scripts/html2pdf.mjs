@@ -1,143 +1,131 @@
-#!/usr/bin/env node
-/**
- * html2pdf.mjs — HTML 报告一键转 PDF（分页适配 + 背景色 + 无头 Chrome）
- *
- * 用法:
- *   node html2pdf.mjs <input.html> [output.pdf] [--no-inject]
- *
- * 流程:
- *   1. 检查 HTML 是否已有打印分页样式（@media print + print-color-adjust）
- *      缺失则注入沉淀的 CSS（分页规则 + 排版放大 + 背景色强制）
- *   2. 无头 Chrome 生成 PDF（--print-to-pdf，等价于手动"另存为 PDF"+勾选背景图形）
- *
- * 幂等: 重复运行不会重复注入。
- */
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { resolve, dirname, basename, join } from 'path';
+// html2pdf.mjs — 用本机 Chrome 内核把 HTML 高保真打印成 PDF
+//
+// 用法:
+//   node html2pdf.mjs <input.html> <output.pdf> [选项]
+//
+// 选项:
+//   --margin "18mm 15mm"        上下 左右 页边距（默认 "18mm 15mm"）
+//   --size "2400px 1350px"      单页画布模式：纸张=该尺寸、页边距 0、只出第 1 页
+//                               （用于海报/全景图等固定画布 HTML）
+//
+// 渲染路径（自动选择）:
+//   1. puppeteer 可用（当前目录或上级 node_modules 里装过）→ 完整控制
+//   2. 否则退回 Chrome headless CLI --print-to-pdf（功能等价，边距经注入 @page 实现）
+//
+// Chrome 探测顺序: $CHROME_PATH → macOS 常见路径 → Windows/Linux 常见路径。
+import { resolve, dirname } from 'path';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
+import { join } from 'path';
 
-const args = process.argv.slice(2).filter(a => a !== '--no-inject');
-const noInject = process.argv.includes('--no-inject');
-
-if (args.length < 1) {
-  console.error('用法: node html2pdf.mjs <input.html> [output.pdf] [--no-inject]');
+const args = process.argv.slice(2);
+const positional = args.filter(a => !a.startsWith('--'));
+const [html, out] = positional;
+if (!html || !out) {
+  console.error('用法: node html2pdf.mjs <input.html> <output.pdf> [--margin "18mm 15mm"] [--size "2400px 1350px"]');
   process.exit(1);
 }
+const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
+const margin = opt('margin', '18mm 15mm');      // "上下 左右"
+const size = opt('size', null);                  // 单页画布模式 "2400px 1350px"
+const [mTB, mLR] = margin.split(/\s+/);
 
-const input = resolve(args[0]);
-const output = resolve(args[1] || input.replace(/\.html?$/i, '.pdf'));
-if (!existsSync(input)) {
-  console.error(`输入文件不存在: ${input}`);
-  process.exit(1);
+// ---- 找 Chrome ----
+function findChrome() {
+  const cands = [
+    process.env.CHROME_PATH,
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
+  ].filter(Boolean);
+  for (const c of cands) if (existsSync(c)) return c;
+  // 兜底：puppeteer 自带的 chrome-headless-shell / chrome（npm i puppeteer 时自动下载）
+  // 缓存结构为 <root>/<family>/<platform-ver>/<嵌套目录>/<二进制>，按文件名递归浅扫
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const NAMES = new Set(['chrome-headless-shell', 'chrome-headless-shell.exe', 'chrome', 'chrome.exe']);
+  const walk = (dir, depth) => {
+    if (depth < 0) return null;
+    for (const name of readdirSyncSafe(dir)) {
+      const p = join(dir, name);
+      if (NAMES.has(name) && existsSync(p)) return p;
+      const deeper = walk(p, depth - 1);
+      if (deeper) return deeper;
+    }
+    return null;
+  };
+  for (const root of [process.env.PUPPETEER_CACHE_DIR, join(home, '.cache', 'puppeteer')].filter(Boolean)) {
+    for (const fam of ['chrome-headless-shell', 'chrome']) {
+      const hit = walk(join(root, fam), 4);
+      if (hit) return hit;
+    }
+  }
+  return null;
 }
-
-let html = readFileSync(input, 'utf-8');
-let injected = [];
-
-/* ---------- 第一步: 注入打印 CSS（幂等） ---------- */
-const PRINT_CSS = `
-<style>
-/* ===== html2pdf skill 注入: 打印分页规则 v1.0 ===== */
-@media print {
-  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-  .page-break { border-bottom: none; margin: 0; height: 0; page-break-after: always; break-after: page; }
-  table, figure, .chart-container, .explain-box, .card, .summary, svg, img {
-    break-inside: avoid; page-break-inside: avoid;
-  }
-  tr { break-inside: avoid; page-break-inside: avoid; }
-  thead { display: table-header-group; }
-  h2, h3, h4 { break-after: avoid; page-break-after: avoid; break-inside: avoid; }
-  p, li { break-inside: avoid; }
-}
-@page { size: A4; margin: 12mm; }
-/* ===== 注入结束 ===== */
-</style>
-`;
-
-const ENLARGE_CSS = `
-<style>
-/* ===== html2pdf skill 注入: 打印排版放大 v1.0 ===== */
-@media print {
-  body { line-height: 1.75; font-size: 13px; }
-  .section h2 { font-size: 21px; padding-bottom: 10px; margin-bottom: 18px; }
-  .section h3 { font-size: 16.5px; margin: 20px 0 12px; }
-  .section h4 { font-size: 15px; margin: 16px 0 10px; }
-  .section { margin-bottom: 28px; }
-  table { font-size: 13px; }
-  th, td { padding: 11px 13px; }
-  table.compact th, table.compact td { padding: 9px 10px; font-size: 12px; }
-  ul, ol { font-size: 13px; margin: 10px 0 10px 24px; }
-  li { margin: 5px 0; }
-  .summary { padding: 18px; margin: 18px 0; }
-  .summary p { font-size: 13px; margin: 7px 0; line-height: 1.85; }
-  p.note { font-size: 13px; line-height: 2.0; margin: 12px 0; }
-  .explain-box { padding: 16px 18px; margin: 14px 0; }
-  .card { padding: 15px; margin: 13px 0; }
-  figcaption { font-size: 12px; margin-top: 8px; }
-}
-/* ===== 注入结束 ===== */
-</style>
-`;
-
-if (!noInject) {
-  if (!/print-color-adjust/i.test(html)) {
-    html = html.replace(/<\/head>/i, PRINT_CSS + '</head>');
-    injected.push('分页规则+背景色');
-  }
-  // 排版放大只在没有任何 @media print 时注入（避免覆盖用户已有调优）
-  if (!/@media\s+print/i.test(html.replace(PRINT_CSS, ''))) {
-    html = html.replace(/<\/head>/i, ENLARGE_CSS + '</head>');
-    injected.push('排版放大');
-  }
-  // chart 容器宽度自适应检查
-  if (/echarts/i.test(html) && !/\.chart-container[^}]*width:\s*100%/.test(html)) {
-    html = html.replace('</head>',
-      '<style>.chart-container { width: 100% !important; }</style></head>');
-    injected.push('图表容器宽度');
-  }
-  if (injected.length) {
-    writeFileSync(input, html);
-    console.log(`[inject] 已注入: ${injected.join(', ')} → ${basename(input)}`);
-  } else {
-    console.log('[inject] 打印样式已存在，跳过注入');
-  }
-}
-
-/* ---------- 第二步: 探测 Chrome ---------- */
-const candidates = [
-  process.env.CHROME_PATH,
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-  '/usr/bin/google-chrome',
-].filter(Boolean);
-const chrome = candidates.find(p => existsSync(p));
+function readdirSyncSafe(p) { try { return readdirSync(p); } catch { return []; } }
+const chrome = findChrome();
 if (!chrome) {
-  console.error('未找到 Chrome/Chromium。可设置环境变量 CHROME_PATH 指定路径。');
+  console.error(`[html2pdf] 未找到可用的 Chrome 内核。三条路任选其一：
+  1) 安装 Chrome / Edge（Windows 通常自带 Edge，已自动探测）
+  2) 设环境变量 CHROME_PATH=<浏览器可执行文件路径>
+  3) 让 puppeteer 自带无头内核（无需安装浏览器）：
+     npm i puppeteer   # 安装时会自动下载 chrome-headless-shell，本脚本下次运行自动识别`);
   process.exit(1);
 }
 
-/* ---------- 第三步: 无头输出 PDF ---------- */
-const fileUrl = 'file://' + input.replace(/\s/g, '%20');
-console.log(`[chrome] ${chrome}`);
-console.log(`[render] ${fileUrl}`);
-try {
-  execFileSync(chrome, [
-    '--headless',
-    '--disable-gpu',
-    '--virtual-time-budget=10000',
-    '--no-pdf-header-footer',
-    `--print-to-pdf=${output}`,
-    fileUrl,
-  ], { stdio: 'pipe', timeout: 60000 });
-} catch (e) {
-  console.error('Chrome 渲染失败:', e.message);
-  process.exit(1);
+const htmlAbs = resolve(html);
+if (!existsSync(htmlAbs)) { console.error('[html2pdf] 输入不存在: ' + htmlAbs); process.exit(1); }
+
+// ---- 路径 1: puppeteer ----
+async function tryPuppeteer() {
+  let puppeteer;
+  try { puppeteer = (await import('puppeteer')).default; }
+  catch { return false; }
+  const browser = await puppeteer.launch({ headless: 'new', executablePath: chrome, args: ['--no-sandbox'] });
+  try {
+    const page = await browser.newPage();
+    if (size) {
+      const [w, h] = size.split(/\s+/).map(s => parseInt(s, 10));
+      await page.setViewport({ width: w, height: h, deviceScaleFactor: 1 });
+    }
+    await page.goto('file://' + htmlAbs, { waitUntil: 'networkidle0' });
+    await new Promise(r => setTimeout(r, 300));   // 等图表/字体收尾
+    if (size) {
+      const [w, h] = size.split(/\s+/).map(s => parseInt(s, 10));
+      await page.addStyleTag({ content: `@page{size:${w}px ${h}px;margin:0} html,body{margin:0!important;padding:0!important}` });
+      await new Promise(r => setTimeout(r, 200));
+      await page.pdf({ path: out, width: `${w}px`, height: `${h}px`, printBackground: true, margin: { top: 0, bottom: 0, left: 0, right: 0 }, pageRanges: '1' });
+    } else {
+      await page.pdf({ path: out, format: 'A4', printBackground: true, margin: { top: mTB, bottom: mTB, left: mLR, right: mLR } });
+    }
+    return true;
+  } finally { await browser.close(); }
 }
 
-if (!existsSync(output)) {
-  console.error('PDF 未生成（Chrome 静默失败），请检查 HTML 是否能正常打开。');
-  process.exit(1);
+// ---- 路径 2: Chrome headless CLI（无 puppeteer 时的兜底）----
+function cliFallback() {
+  // 复制一份注入 @page 规则（不改原文件）
+  const tmp = join(tmpdir(), `html2pdf-${Date.now()}.html`);
+  const inject = size
+    ? `<style>@page{size:${size};margin:0} html,body{margin:0!important;padding:0!important}</style>`
+    : `<style>@page{size:A4;margin:${mTB} ${mLR}}</style>`;
+  const src = readFileSync(htmlAbs, 'utf-8');
+  writeFileSync(tmp, src.replace(/<head[^>]*>/i, m => m + inject));
+  try {
+    execFileSync(chrome, [
+      '--headless', '--disable-gpu', '--no-sandbox',
+      '--no-pdf-header-footer', '--virtual-time-budget=5000',
+      `--print-to-pdf=${resolve(out)}`, 'file://' + tmp,
+    ], { stdio: 'pipe', timeout: 60000 });
+  } finally { try { unlinkSync(tmp); } catch {} }
+  return true;
 }
-console.log(`[done] ${output}`);
+
+let ok = false;
+try { ok = await tryPuppeteer(); } catch (e) { console.error('[html2pdf] puppeteer 路径失败，退回 CLI：' + e.message); }
+if (!ok) cliFallback();
+if (!existsSync(resolve(out))) { console.error('[html2pdf] 失败：未生成 ' + out); process.exit(1); }
+console.log('[html2pdf] OK: ' + resolve(out) + (size ? ` (单页 ${size})` : ` (A4, 边距 ${margin})`));

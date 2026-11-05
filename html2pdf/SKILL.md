@@ -1,99 +1,108 @@
 ---
-name: html2pdf
-description: 把任意 HTML 报告改造成分页友好版本并用无头 Chrome 一键导出 PDF（自动含背景图形、表格不截断、无留白）。触发词：html 转 pdf、导出 pdf、生成 pdf、打印成 pdf、pdf 分页、pdf 截断、打印样式、打印适配。
+name: html-to-pdf-chrome
+display_name: "HTML 转 PDF（高保真渲染）"
+display_name_en: "HTML to PDF (High-Fidelity)"
+description: "把本地 HTML 用真实 Chromium 内核打印管线高保真转成 PDF：中文、SVG/Canvas 图表、Grid/Flex 布局、JS 动态图表（ECharts 等）全部所见即所得，输出矢量文字 PDF（可选中可搜索）。不是截图。支持 A4 流式文档与固定画布单页（海报/全景图/大屏卡片）两种模式；零安装依赖，自动探测系统 Chrome/Edge。"
+description_zh: "用本机 Chrome 内核把本地 HTML 高保真转成 PDF：真实浏览器渲染，中文、图表、Grid/Flex 布局、JS 动态图表全部所见即所得，输出矢量文字 PDF。支持 A4 多页流式文档和固定画布单页两种模式，零安装依赖。"
+description_en: "Convert local HTML to high-fidelity PDF via the real Chrome rendering engine - CJK text, SVG/Canvas charts, Grid/Flex layouts and JS-driven charts render exactly as in a browser. Outputs vector, selectable-text PDF. A4 flowing documents and fixed-canvas single-page mode. Zero-install."
+examples_zh:
+  - "把这个 HTML 报告转成 PDF"
+  - "这张海报导出成单页 PDF"
+  - "网页转 PDF，中文别乱码"
+examples_en:
+  - "Convert this HTML report to PDF"
+  - "Export this poster as a single-page PDF"
+  - "Turn this page into a PDF without broken CJK glyphs"
+version: "2.0.0"
+author: "Microlab（microlab.top）"
 ---
 
-# html2pdf — HTML 适配 PDF 分页输出 Skill
+# HTML 转 PDF（高保真渲染）
 
-将任意 HTML 报告转化为分页友好、可直接输出 PDF 的版本，并用无头 Chrome 一键生成 PDF（自动含背景图形，无需手动打开浏览器勾选）。
+> **Microlab 出品** · 更多工具与文章：[microlab.top](https://microlab.top)
 
-## 触发条件
+## Overview
 
-当用户提到以下关键词或场景时使用此 Skill：
-- `html 转 pdf` / `导出 pdf` / `生成 pdf` / `打印成 pdf`
-- `pdf 分页` / `pdf 留白` / `pdf 截断` / `分页不截断`
-- `打印样式` / `打印适配` / `html 适配 pdf`
-- 用户拿着一个 HTML 报告说"要输出成 PDF"或抱怨"用浏览器打印有留白/表格被切断"
-- 用户提到 GoFullPage / 长截图转 PDF 类工具的问题
+把本地 HTML 转成 PDF，渲染引擎是**本机真实 Chrome**（不是 weasyprint 这类纯 CSS 引擎）。
+因此 JS 会执行、字体用系统字体栈（macOS 的 PingFang 等）、Grid/Flex/SVG/Canvas 全部按浏览器语义渲染——
+转换结果就是「在浏览器里看到的样子」。
 
-## 使用方法
+**高保真的含义**：不是截图，是原生矢量 PDF——文字可选中、可搜索、放大不糊，打印不发虚。
 
-```bash
-node <skill目录>/scripts/html2pdf.mjs <input.html> [output.pdf]
-```
+脚本零安装依赖：有 puppeteer 用 puppeteer（控制最全），没有则自动退回 Chrome headless CLI，产物等价。
+渲染内核自动探测：本机 Chrome/Chromium/Edge（Windows 自带 Edge）→ puppeteer 自带的 chrome-headless-shell（`npm i puppeteer` 即得，无需装浏览器）。
 
-- `input.html`：源 HTML 文件路径（必填）
-- `output.pdf`：输出 PDF 路径（可选，默认与输入同名的 .pdf）
-
-脚本会自动完成：检查/注入打印分页 CSS → 无头 Chrome 渲染 → 输出 PDF。幂等：已注入过的不重复注入。
-
-快捷调用（skill 在项目 AIAgent 内）：
+## 快速开始
 
 ```bash
-node <技能目录>/scripts/html2pdf.mjs 报告.html
+node <skill_dir>/scripts/html2pdf.mjs <input.html> <output.pdf>
 ```
 
-## 输入参数
+- 默认 A4 多页流式文档，页边距上下 18mm / 左右 15mm。
+- 用 `node` 直接跑即可；脚本内自动探测 Chrome（`$CHROME_PATH` → macOS/Windows/Linux 常见安装路径）。
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| input.html | 路径 | 是 | 源 HTML |
-| output.pdf | 路径 | 否 | 输出路径，默认同名 .pdf |
-| --no-inject | 开关 | 否 | 跳过 CSS 注入，直接转 PDF（HTML 已有打印样式时用） |
+### 两种模式
 
-## 核心逻辑
+| 模式 | 触发 | 行为 |
+|---|---|---|
+| A4 流式文档（默认） | 不传 --size | A4 纸张、自动分页、页边距可调 `--margin "14mm 12mm"` |
+| 单页画布 | `--size "2400px 1350px"` | 纸张=画布尺寸、边距 0、只出第 1 页。用于海报/全景图/大屏卡片等固定尺寸 HTML |
 
-### 第一步：CSS 适配（脚本自动注入）
+判断用哪个模式：HTML 里有固定像素画布（如 `#stage{width:2400px;height:1350px}`）→ 单页模式，尺寸从 CSS 里读；普通流式排版的文章/报告 → 默认 A4。
 
-注入的打印样式包含三层（沉淀自先进封装报告调优实践）：
-
-1. **分页规则**（防截断）
-   - `@page { size: A4; margin: 12mm }`
-   - 块级元素 `break-inside: avoid`：table / figure / .card / .summary / svg / img 等整块不跨页
-   - `tr { break-inside: avoid }` + `thead { display: table-header-group }`：大表格逐行保护、表头每页重复
-   - `h2/h3/h4 { break-after: avoid }`：标题不孤行
-   - **`* { print-color-adjust: exact }`：强制输出背景色**——这是无头 Chrome 免勾选"背景图形"的关键
-2. **排版放大**（防空白，目标每页 80%+）
-   - `@media print` 下整体字号 11→13px、单元格 padding 加大、行距 1.75
-   - 源文件已有的 `@media print` 块不会被覆盖（注入只补缺失部分）
-3. **不注入强制分页点**——`.page-break` 类留给用户自己按需添加，默认让内容自然流动（强制分页是留白元凶）
-
-### 第二步：ECharts / JS 图表自适应（若源文件含 ECharts）
-
-检查三点，缺则修复：
-- `.chart-container` 或图表容器是否有 `width: 100%`（防 canvas 默认 800px 溢出）
-- 每个 `echarts.init` 后是否紧跟 `chart.resize()`
-- 文件末尾是否有 `window.addEventListener('resize', ...)`
-
-无头打印场景下 canvas 按初始布局渲染，`resize()` 保证渲染尺寸 = 容器尺寸。
-
-### 第三步：无头 Chrome 输出 PDF
+### 常用示例
 
 ```bash
-"$CHROME" --headless --disable-gpu --virtual-time-budget=10000 \
-  --no-pdf-header-footer --print-to-pdf="$OUTPUT" "file://$INPUT"
+# 报告文档 → A4 PDF
+node scripts/html2pdf.mjs report.html report.pdf
+
+# 调页边距
+node scripts/html2pdf.mjs report.html report.pdf --margin "20mm 20mm"
+
+# 海报/全景图（固定画布）→ 单页矢量 PDF
+node scripts/html2pdf.mjs poster.html poster.pdf --size "1080px 1440px"
 ```
 
-- `--virtual-time-budget=10000`：快进页面 JS（等 ECharts 渲染完成）
-- `--no-pdf-header-footer`：去掉页眉页脚
-- Chrome 路径按序探测：环境变量 `CHROME_PATH` → `/Applications/Google Chrome.app/...` → `chromium` → `google-chrome`
-- 背景/底色由第一步注入的 `print-color-adjust: exact` 保证，无需浏览器勾选
+## 转换后必须目检（勿跳过）
 
-## 输出格式
+转换完成不代表渲染正确。每次交付前抽查：
 
-- 输出 PDF 文件（A4、含背景色、分页不截断）
-- 若发生了 CSS/JS 注入，会同时保存修改后的 HTML（源文件就地更新，PDF 基于更新后的版本）
-- 控制台输出：注入了什么、Chrome 路径、PDF 输出路径
+```bash
+# macOS：渲染首页为图片
+sips -s format png <output.pdf> --out /tmp/pdf-p1.png
+# 有 pdftoppm 则更灵活（可指定页码范围）
+pdftoppm -png -r 60 -f 1 -l 2 <output.pdf> /tmp/chk
+```
 
-## AI 分析提示
+然后用 Read 工具查看图片，确认：① 中文无豆腐块；② 图表/图形完整渲染；③ 首页无截断、留白正常。
+页数校验可用 pypdf 读 `len(PdfReader(p).pages)`。
 
-- 执行后**必须实际检查产物**：用 `ls -la` 确认 PDF 生成、文件大小合理（几百 KB 以上说明图表渲染成功）
-- 用户反馈"某页留白多/被截断"时，定位该页对应的 HTML 区块，针对性调整 `@media print` 里该区块的字号/间距，而不是全局重调
-- 若 HTML 是在线文章或含远程图片，提醒用户网络需可访问；`--virtual-time-budget` 已给 10 秒预算
-- 若用户还需要"某章独立起页"，指导其在章节间插入 `<div style="page-break-after: always"></div>`，不要全局加
+## 为什么不用 weasyprint（排障参考）
 
-## 关联资源
+若用户之前用 weasyprint 类工具转出来「中文乱码/豆腐块、数字错位、布局散架」，根因是：
 
-- `scripts/html2pdf.mjs`：一键转换脚本（CSS 注入 + Chrome 调用）
-- 实战场景：含 ECharts 图表的多页分析报告（分页 CSS + 图表自适应已完整落地）
-- 建议自建一份含分页 CSS 的空白模板，随项目沉淀复用
+1. **不执行 JS**——ECharts 等 JS 图表直接空白；
+2. **Grid/Flex 支持残缺**——现代网页布局被拆散；
+3. **字体栈写死 Linux**（如 Noto Sans CJK SC）——macOS/Windows 上没有该字体就 fallback 成豆腐块；
+4. 依赖 cairo/pango 原生库，版本组合脆弱。
+
+本 skill 走真实 Chrome 渲染，上述问题全部不存在。不要「修复」weasyprint 路线的产物，直接换本 skill 重转。
+
+## 环境要求与排障
+
+| 情况 | 处理 |
+|---|---|
+| 找不到 Chrome | 三条路：① 装 Chrome（Windows 一般自带 Edge，已自动探测）；② `export CHROME_PATH=<浏览器路径>`；③ `npm i puppeteer`（安装时自动下载 chrome-headless-shell 无头内核，脚本下次运行自动识别） |
+| 有 puppeteer | 自动使用（从当前工作目录的 node_modules 解析）；控制最全 |
+| 无 puppeteer | 自动退回 Chrome headless CLI，产物等价 |
+| JS 图表渲染不全 | 脚本已等 networkidle0 + 300ms；仍不全则把等待调长（改脚本里 300 为 1000） |
+| 中文文件名 | 直接支持，无需特殊处理 |
+
+## Resources
+
+### scripts/
+- `html2pdf.mjs`：主转换脚本。A4 流式 + 单页画布双模式，Chrome 自动探测，puppeteer/CLI 双路径兜底。
+
+---
+
+*Microlab 出品 · 官网 [microlab.top](https://microlab.top) · 公众号 MicroLabV*

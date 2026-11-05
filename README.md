@@ -9,7 +9,7 @@ Microlab 出品的生产级 Agent Skills —— 我们每天自己也在用的�
 | Skill | 说明 | 版本 |
 |---|---|---|
 | [code-card](code-card/) · [下载 zip](zips/code-card.zip) | 把代码渲染成 Carbon 风格高清代码卡片（PNG）。macOS 窗口圆点 + 行号 + 语法高亮 + 3x Retina + 中文清晰；单段出图与 Markdown 批量转图，6 套主题，离线可用 | v2.2.0 |
-| [html2pdf](html2pdf/) · [下载 zip](zips/html2pdf.zip) | 无头 Chromium 把 HTML 报告导出成分页友好 PDF：自动注入打印样式、表格不截断、保留背景色 | v1.0.0 |
+| [html2pdf](html2pdf/) · [下载 zip](zips/html2pdf.zip) | 真实 Chrome 内核打印管线把 HTML 高保真转成 PDF：中文/图表/Grid/Flex/JS 图表所见即所得，矢量文字可选中；A4 流式与固定画布单页双模式 | v2.0.0 |
 
 ## 安装
 
